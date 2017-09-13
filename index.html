@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+    <script src= "https://localhost.twitch.tv:8000/js/embed/v1.js"></script>
+    <div id="playerdiv1"></div>
+    <script type="text/javascript">
+        var options = {
+            width: 800,
+            height: 400,
+            channel: "monstercat",
+            player: "amazon_live",
+        };
+
+        var player1 = new Twitch.Player("playerdiv1", options);
+        player1.addEventListener(Twitch.Analytics.VIDEO_PLAY, () => console.debug('VIDEO PLAY'));
+        // player1.addEventListener(Twitch.Errors.NETWORK, () => console.debug('NETWORK'));
+        // player1.addEventListener(Twitch.Errors.DECODE, () => console.debug('DECODE'));
+        // player1.addEventListener(Twitch.Errors.FORMAT_NOT_SUPPORTED, () => console.debug('FORMAT_NOT_SUPPORTED'));
+        // player1.addEventListener(Twitch.Errors.NOT_AUTHORIZED, () => console.debug('NOT_AUTHORIZED'));
+        // player1.addEventListener(Twitch.Errors.ABORTED, () => console.debug('ABORTED'));
+    </script>
+</html>
+<!-- <html>
+    <script src= "https://testplayer.twitch.tv/testplayer_embed/js/embed/v1.js"></script>
+    <div id="embeddiv"></div><script type="text/javascript">
+        var embed = new Twitch.Player("embeddiv", {width:600,height:300,channel:"monstercat"});
+    </script>
+</html> -->

@@ -26,6 +26,14 @@
             console.debug('player1.getTheatre()', player1.getTheatre());
         });
 
+        player1.addEventListener(Twitch.Player.PAUSE, () => {
+            console.debug('PAUSE');
+        });
+       
+        player1.addEventListener(Twitch.Player.PLAY, () => {
+            console.debug('PLAY');
+        });
+        
         player1.addEventListener(Twitch.Player.PLAYBACK_BLOCKED, () => {
             console.debug('LOL PLAYBACK BLOCKED');
         });

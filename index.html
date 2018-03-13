@@ -6,7 +6,7 @@
         var options = {
             // width: 300,
             // height: 200,
-            channel: "monstercat",
+            channel: "jchang",
             autoplay: true,
             playsinline: true,
             // video: '169137258',
@@ -34,7 +34,16 @@
         player1.addEventListener(Twitch.Player.PLAY, () => {
             console.debug('PLAY');
         });
+         
+        player1.addEventListener(Twitch.Player.ONLINE, () => {
+            console.debug('ONLINE');
+        });
         
+        player1.addEventListener(Twitch.Player.OFFLINE, () => {
+            console.debug('OFFLINE');
+        });
+        
+               
         player1.addEventListener(Twitch.Player.PLAYBACK_BLOCKED, () => {
             console.debug('LOL PLAYBACK BLOCKED');
         });

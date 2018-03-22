@@ -34,7 +34,11 @@
         player1.addEventListener(Twitch.Player.PLAY, () => {
             console.debug('PLAY');
         });
-         
+        
+        player1.addEventListener(Twitch.Player.PLAYING, () => {
+            console.debug('PLAYING');
+        });
+        
         player1.addEventListener(Twitch.Player.ONLINE, () => {
             console.debug('ONLINE');
         });

@@ -6,15 +6,13 @@
         var options = {
             // width: 300,
             // height: 200,
-            channel: "monstercat",
-            autoplay: true,
-            playsinline: true,
+            //channel: "monstercat",
             // video: '169137258',
-            // video: 'v116196889',
+            video: 'v207843308',
             // collection: '5ogWtgJt3RQQVA',
             // time: '100s',
             // time: 100,
-            // player: "amazon_live",
+            player: "amazon_live",
             // player: "amazon_vse_test",
             // player: "site"
             // contentId: 'jchang11',
@@ -47,14 +45,18 @@
             console.debug('OFFLINE');
         });
         
+        player1.addEventListener(Twitch.Player.CAPTIONS, text => {
+            console.debug('CAPTIONS');
+            console.debug('text', text);
+        });
                
         player1.addEventListener(Twitch.Player.PLAYBACK_BLOCKED, () => {
             console.debug('LOL PLAYBACK BLOCKED');
         });
         // player1.setContentUrl('https://usher.ttvnw.net/api/lvs/hls/lvs.twitch-dev.jchang.m3u8?allow_source=true&player_backend=mediaplayer');
         player1.addEventListener(Twitch.Analytics.VIDEO_ERROR, (payload) => {
+            console.debug('VIDEO ERROR');
             console.debug('payload', payload);
-            console.debug('VIDEO ERROR')
         });
         player1.addEventListener(Twitch.Player.ERROR, (payload) => console.debug('payload', payload));
     </script>

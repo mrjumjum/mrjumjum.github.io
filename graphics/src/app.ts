@@ -58,8 +58,8 @@ class App {
         const Writer = MeshWriter(scene, { scale: 1, defaultFont: "Arial" });
         const textMesh = new Writer("Happy Mother's Day", {
             "font-family": "Arial",
-            "letter-height": 15,
-            "letter-thickness": 2,
+            "letter-height": 10,
+            "letter-thickness": 1,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -70,8 +70,8 @@ class App {
             },
             position: {
                 x: 0,
-                y: 2,
-                z: 30,
+                y: 1,
+                z: 20,
             }
         });
 

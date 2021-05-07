@@ -9,6 +9,8 @@ import skybox_px from "./textures/skybox_px.jpg";
 import skybox_py from "./textures/skybox_py.jpg";
 import skybox_pz from "./textures/skybox_pz.jpg";
 import flare from "./textures/flare.png";
+import firework_crackle from "./sounds/firework-crackle.mp3";
+import firework_pop from "./sounds/firework-pop.mp3";
 
 import * as BABYLON from "@babylonjs/core";
 (window as any).BABYLON = BABYLON;
@@ -176,7 +178,7 @@ class Show {
 
         light.intensity = 0.15;
         light.parent = sphere;
-        sphere.position.z = this.randomInt(-5, 10);
+        sphere.position.z = this.randomInt(-10, 10);
         sphere.position.x = this.randomInt(-10, 10);
 
         sphere.convertToUnIndexedMesh();
@@ -225,19 +227,19 @@ class Show {
             }else{
                 particleSystem.dispose();
                 if(!sphere.isDisposed()){
-                       var sphereTmp = sphere.clone();
-                       this.createFireworksExplosion(sphereTmp);
-                    // let popSound = new BABYLON.Sound("firework-crackling", "sounds/FireWorks-Single-B.mp3", this._scene, null, {
-                    //     autoplay: true,
-                    //     spatialSound: true,
-                    //     distanceModel: "linear",
-                    //     maxDistance: 1000,
-                    //     rolloffFactor: 10
-                    // });
-                    // popSound.attachToMesh(sphereTmp);
-                    // new BABYLON.Sound("firework-crackling", "sounds/FireWorks-Crackling.mp3", this._scene, null, {
-                    //     autoplay: true
-                    // });
+                    var sphereTmp = sphere.clone();
+                    this.createFireworksExplosion(sphereTmp);
+                    let popSound = new BABYLON.Sound("firework-pop", firework_pop, this.scene, null, {
+                        autoplay: true,
+                        spatialSound: true,
+                        distanceModel: "linear",
+                        maxDistance: 1000,
+                        rolloffFactor: 10
+                    });
+                    popSound.attachToMesh(sphereTmp);
+                    new BABYLON.Sound("firework-crackle", firework_crackle, this.scene, null, {
+                        autoplay: true
+                    });
                 }
                 sphere.dispose();
                 sphere.material?.dispose();

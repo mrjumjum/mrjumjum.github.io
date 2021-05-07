@@ -11,10 +11,18 @@ import skybox_pz from "./textures/skybox_pz.jpg";
 import flare from "./textures/flare.png";
 import firework_crackle from "./sounds/firework-crackle.mp3";
 import firework_pop from "./sounds/firework-pop.mp3";
+import firework_whistle from "./sounds/firework-whistle.wav";
 
 import * as BABYLON from "@babylonjs/core";
+import * as CANNON from "cannon";
 (window as any).BABYLON = BABYLON;
+(window as any).CANNON = CANNON;
 import * as MeshWriter from "meshwriter";
+
+const ROCKET_VELOCITY = 12; // per second
+const GRAVITY  = -5; // per second
+const ROCKET_FLIGHT_TIME = 2; // seconds
+const ROCKET_MASS = 1;
 
 class Show {
     private canvas: HTMLCanvasElement;
@@ -30,6 +38,7 @@ class Show {
         document.body.appendChild(this.canvas);
         this.engine = new BABYLON.Engine(this.canvas, true); // Generate the BABYLON 3D engine
         this.scene = new BABYLON.Scene(this.engine);
+        this.scene.enablePhysics(new BABYLON.Vector3(0, GRAVITY, 0), new BABYLON.CannonJSPlugin());
 
         this.initCamera();
         // this.initLights();
@@ -37,7 +46,7 @@ class Show {
         this.initGroundXR();
         this.initText();
         this.initKeyEvents();
-        this.createRocketOnTimer();
+        // this.fireRocketOnTimer();
 
 
         //init background music
@@ -52,7 +61,7 @@ class Show {
 
     private initLights() {
         const light = new HemisphericLight("light1", new Vector3(0, 1, 0), this.scene);
-        light.intensity = 0.7;
+        light.intensity = 0.2;
     }
 
     private initSkybox() {
@@ -75,10 +84,37 @@ class Show {
     private async initGroundXR() {
         const ground = MeshBuilder.CreateGround("ground", {height: 1000, width: 1000, subdivisions: 1});
         ground.receiveShadows = true;
+        ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.PlaneImpostor, { mass: 0, restitution: 0.9 }, this.scene);
 
         const xr = await this.scene.createDefaultXRExperienceAsync({
             floorMeshes: [ground],
         });
+
+        if (!xr.baseExperience) {
+            // no xr support
+        } else {
+            xr.input.onControllerAddedObservable.add((inputSource) => {
+                inputSource.onMotionControllerInitObservable.add((motionController) => {
+                    const triggerComponent = motionController.getComponent("xr-standard-trigger");
+                    if (triggerComponent) {
+                        triggerComponent.onButtonStateChangedObservable.add((component) => {
+                            let changes = component.changes;
+                            if (changes.pressed) {
+                                // pressed state changed
+                                const isPressedNow = changes.pressed.current;
+                                const wasPressedInLastFrame = changes.pressed.previous;
+                                if (!isPressedNow && wasPressedInLastFrame) {
+                                    const resultRay = new BABYLON.Ray(new Vector3(), new Vector3());
+                                    // get the pointer direction
+                                    inputSource.getWorldPointerRayToRef(resultRay);
+                                    this.fireRocket(resultRay.direction, resultRay.origin);
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+        }
     }
 
     private initText() {
@@ -87,7 +123,7 @@ class Show {
         textMeshes.push(new Writer("Happy", {
             "font-family": "Arial",
             "letter-height": 10,
-            "letter-thickness": 1,
+            "letter-thickness": 3,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -106,7 +142,7 @@ class Show {
         textMeshes.push(new Writer("Mother's", {
             "font-family": "Arial",
             "letter-height": 10,
-            "letter-thickness": 1,
+            "letter-thickness": 3,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -117,7 +153,7 @@ class Show {
             },
             position: {
                 x: 0,
-                y: 5,
+                y: 2,
                 z: 7,
             }
         }).getMesh());
@@ -125,7 +161,7 @@ class Show {
         textMeshes.push(new Writer("Day", {
             "font-family": "Arial",
             "letter-height": 10,
-            "letter-thickness": 1,
+            "letter-thickness": 3,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -143,9 +179,8 @@ class Show {
 
         textMeshes.forEach(m => {
             m.rotation.x = - Math.PI / 2;
-        });
-        textMeshes.forEach(m => {
             m.receiveShadows = true;
+            m.physicsImpostor = new BABYLON.PhysicsImpostor(m, BABYLON.PhysicsImpostor.MeshImpostor, { mass: 0, restitution: 0.9 }, this.scene);
         });
 
         this.shadowCasters = textMeshes;
@@ -170,16 +205,16 @@ class Show {
         });
     }
 
-    private createRocket(){
-        var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter:.25}, this.scene);
+    private fireRocket(direction: BABYLON.Vector3, startingPosition: BABYLON.Vector3){
+        var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter:.15}, this.scene);
+        sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere, BABYLON.PhysicsImpostor.SphereImpostor, { mass: ROCKET_MASS, restitution: 0.9 }, this.scene);
+
         var light = new BABYLON.PointLight("pointlight", new BABYLON.Vector3(sphere.position.x, sphere.position.y-0.26, sphere.position.z), this.scene)
         var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
         this.shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
 
-        light.intensity = 0.15;
+        light.intensity = 0.2;
         light.parent = sphere;
-        sphere.position.z = this.randomInt(-10, 10);
-        sphere.position.x = this.randomInt(-10, 10);
 
         sphere.convertToUnIndexedMesh();
         // sphere.cullingStrategy = BABYLON.AbstractMesh.CULLINGSTRATEGY_OPTIMISTIC_INCLUSION_THEN_BSPHERE_ONLY;
@@ -194,41 +229,43 @@ class Show {
         sphere.material = sphereMaterial;
         light.diffuse = rocketColor;
         light.specular = rocketColor;
-        // attach particles to sphere
+
         var particleSystem = this.attachParticleSystem(sphere);
         particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
-        particleSystem.textureMask = new Color3(1 - rgb[0], 1 - rgb[1], 1 - rgb[2]).toColor4();
 
-        //make sphere move
-        var i = 0;
-        var direction = new BABYLON.Vector3(0, 1, 0);
-        let distance = 0.1;
+        const SECOND_MS = 1000;
+        const particleSlowDownTime = ROCKET_FLIGHT_TIME * SECOND_MS * 2/3;
+        const particleCutoffTime = ROCKET_FLIGHT_TIME * SECOND_MS * 5/6;
 
+        sphere.position = startingPosition.clone();
+        sphere.physicsImpostor.setLinearVelocity(direction.normalizeToNew().multiplyByFloats(ROCKET_VELOCITY, ROCKET_VELOCITY, ROCKET_VELOCITY));
+        let whistleSound = new BABYLON.Sound("firework-whistle", firework_whistle, this.scene, null, {
+            autoplay: true,
+            spatialSound: true,
+            distanceModel: "linear",
+            maxDistance: 1000,
+            rolloffFactor: 20
+        });
+        whistleSound.attachToMesh(sphere);
+
+        const startTime = Date.now();
+        let exploded = false;
         this.scene.registerAfterRender( () => {
-            //var particleSystem = new BABYLON.ParticleSystem("particles", 1, scene);
-            //var explosionSphere = BABYLON.MeshBuilder.CreateSphere("sphere", { diameter: 2.5 }, scene);
+            const t = Date.now();
+            if(t < startTime + particleSlowDownTime) {
 
-            let fireworkLifetime = this.randomInt(50,150);
-            if(i++ < fireworkLifetime) {
-                sphere.translate(direction, distance, BABYLON.Space.WORLD);
-            }else if(i++ < fireworkLifetime + 50){
-                //Texture of each particle
-                // particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
-                // Where the particles come from
+            }else if (t < startTime + particleCutoffTime){
                 particleSystem.emitRate = 100;
-
-                // Life time of each particle (random between...
                 particleSystem.minLifeTime = 0.2;
                 particleSystem.maxLifeTime = 0.5;
-
-                // explosionSphere.position = sphere.position;
-            }else if(i++ < fireworkLifetime + 150){
+            }else if(t < startTime + ROCKET_FLIGHT_TIME * SECOND_MS){
                 particleSystem.stop();
             }else{
-                particleSystem.dispose();
-                if(!sphere.isDisposed()){
-                    var sphereTmp = sphere.clone();
-                    this.createFireworksExplosion(sphereTmp);
+                if(!exploded){
+                    particleSystem.dispose();
+                    exploded = true;
+                    sphere.physicsImpostor.dispose();
+                    this.createFireworksExplosion(sphere);
                     let popSound = new BABYLON.Sound("firework-pop", firework_pop, this.scene, null, {
                         autoplay: true,
                         spatialSound: true,
@@ -236,13 +273,11 @@ class Show {
                         maxDistance: 1000,
                         rolloffFactor: 10
                     });
-                    popSound.attachToMesh(sphereTmp);
+                    popSound.attachToMesh(sphere);
                     new BABYLON.Sound("firework-crackle", firework_crackle, this.scene, null, {
                         autoplay: true
                     });
                 }
-                sphere.dispose();
-                sphere.material?.dispose();
             }
         });
     }
@@ -291,7 +326,7 @@ class Show {
     }
 
     private createFireworksExplosion(sphere : BABYLON.Mesh){
-        const fireworksColor = (sphere.material as BABYLON.StandardMaterial).diffuseColor;
+        const fireworksColor = (sphere.material as BABYLON.StandardMaterial).diffuseColor.clone();
         if (!BABYLON.Effect.ShadersStore["customVertexShader"]){
             BABYLON.Effect.ShadersStore["customVertexShader"] = "\r\n" +
                 "precision highp float;\r\n" +
@@ -384,10 +419,10 @@ class Show {
         });
     }
 
-    private createRocketOnTimer(){
-        this.createRocket();
+    private fireRocketOnTimer(){
+        this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(5,5,5));
         setInterval( () => {
-            this.createRocket();
+            this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(5,5,5));
         }, 3000);
     }
 

@@ -18,6 +18,7 @@ class Show {
     private canvas: HTMLCanvasElement;
     private engine: BABYLON.Engine;
     private scene: BABYLON.Scene;
+    private shadowCasters: BABYLON.Mesh[] = [];
 
     constructor(){
         this.canvas = document.createElement("canvas");;
@@ -30,7 +31,7 @@ class Show {
 
         this.initCamera();
         // this.initLights();
-        this.initSkybox();
+        // this.initSkybox();
         this.initGroundXR();
         this.initText();
         this.initKeyEvents();
@@ -70,8 +71,8 @@ class Show {
     }
 
     private async initGroundXR() {
-        const ground = MeshBuilder.CreateGround("ground", {height: 100, width: 100, subdivisions: 1});
-        ground.visibility = 0;
+        const ground = MeshBuilder.CreateGround("ground", {height: 1000, width: 1000, subdivisions: 1});
+        ground.receiveShadows = true;
 
         const xr = await this.scene.createDefaultXRExperienceAsync({
             floorMeshes: [ground],
@@ -80,7 +81,8 @@ class Show {
 
     private initText() {
         const Writer = MeshWriter(this.scene, { scale: 0.25, defaultFont: "Arial" });
-        const textMesh1 = new Writer("Happy", {
+        let textMeshes = []
+        textMeshes.push(new Writer("Happy", {
             "font-family": "Arial",
             "letter-height": 10,
             "letter-thickness": 1,
@@ -95,11 +97,11 @@ class Show {
             position: {
                 x: -20,
                 y: 10,
-                z: 40,
+                z: 17,
             }
-        });
+        }).getMesh());
 
-        const textMesh2 = new Writer("Mother's", {
+        textMeshes.push(new Writer("Mother's", {
             "font-family": "Arial",
             "letter-height": 10,
             "letter-thickness": 1,
@@ -114,11 +116,11 @@ class Show {
             position: {
                 x: 0,
                 y: 5,
-                z: 20,
+                z: 7,
             }
-        });
+        }).getMesh());
 
-        const textMesh3 = new Writer("Day", {
+        textMeshes.push(new Writer("Day", {
             "font-family": "Arial",
             "letter-height": 10,
             "letter-thickness": 1,
@@ -133,13 +135,18 @@ class Show {
             position: {
                 x: 20,
                 y: 15,
-                z: 10,
+                z: 2,
             }
+        }).getMesh());
+
+        textMeshes.forEach(m => {
+            m.rotation.x = - Math.PI / 2;
+        });
+        textMeshes.forEach(m => {
+            m.receiveShadows = true;
         });
 
-        textMesh1.getMesh().rotation.x = - Math.PI / 2;
-        textMesh2.getMesh().rotation.x = - Math.PI / 2;
-        textMesh3.getMesh().rotation.x = - Math.PI / 2;
+        this.shadowCasters = textMeshes;
     }
 
     private initKeyEvents() {
@@ -164,9 +171,12 @@ class Show {
     private createRocket(){
         var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter:.25}, this.scene);
         var light = new BABYLON.PointLight("pointlight", new BABYLON.Vector3(sphere.position.x, sphere.position.y-0.26, sphere.position.z), this.scene)
-        light.intensity = 0.3;
+        var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+        this.shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
+
+        light.intensity = 0.15;
         light.parent = sphere;
-        sphere.position.z = this.randomInt(0, 20);
+        sphere.position.z = this.randomInt(-5, 10);
         sphere.position.x = this.randomInt(-10, 10);
 
         sphere.convertToUnIndexedMesh();
@@ -196,7 +206,7 @@ class Show {
             //var particleSystem = new BABYLON.ParticleSystem("particles", 1, scene);
             //var explosionSphere = BABYLON.MeshBuilder.CreateSphere("sphere", { diameter: 2.5 }, scene);
 
-            let fireworkLifetime = this.randomInt(100,250);
+            let fireworkLifetime = this.randomInt(50,150);
             if(i++ < fireworkLifetime) {
                 sphere.translate(direction, distance, BABYLON.Space.WORLD);
             }else if(i++ < fireworkLifetime + 50){
@@ -216,7 +226,6 @@ class Show {
                 particleSystem.dispose();
                 if(!sphere.isDisposed()){
                        var sphereTmp = sphere.clone();
-                       console.log(sphereTmp.getChildren());
                        this.createFireworksExplosion(sphereTmp);
                     // let popSound = new BABYLON.Sound("firework-crackling", "sounds/FireWorks-Single-B.mp3", this._scene, null, {
                     //     autoplay: true,
@@ -255,7 +264,7 @@ class Show {
         particleSystem.maxLifeTime = 0.7;
 
         // Emission rate
-        particleSystem.emitRate = 2500;
+        particleSystem.emitRate = 1000;
 
         // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
         particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
@@ -280,6 +289,7 @@ class Show {
     }
 
     private createFireworksExplosion(sphere : BABYLON.Mesh){
+        const fireworksColor = (sphere.material as BABYLON.StandardMaterial).diffuseColor;
         if (!BABYLON.Effect.ShadersStore["customVertexShader"]){
             BABYLON.Effect.ShadersStore["customVertexShader"] = "\r\n" +
                 "precision highp float;\r\n" +
@@ -294,11 +304,12 @@ class Show {
                 "uniform float r;\r\n" +
                 "uniform float g;\r\n" +
                 "uniform float b;\r\n" +
+                "uniform float a;\r\n" +
 
                 "void main(void) {\r\n" +
                 "    vec3 p = position;\r\n" +
                 "    vec3 j = vec3(0., -1.0, 0.);\r\n" +
-                "    p = p + normal * log2(time);\r\n" +
+                "    p = p + normal * log(time) * 0.5;\r\n" +
                 "    gl_Position = worldViewProjection * vec4(p, 1.0);\r\n" +
                 "}\r\n";
 
@@ -309,12 +320,12 @@ class Show {
                 "uniform float r;\r\n" +
                 "uniform float g;\r\n" +
                 "uniform float b;\r\n" +
+                "uniform float a;\r\n" +
 
                 "void main(void) {\r\n" +
-                "    gl_FragColor = vec4(r, g, b, 1.0 );\r\n" +
+                "    gl_FragColor = vec4(r, g, b, a );\r\n" +
                 "}\r\n";
         }
-
 
         var shaderMaterial = new BABYLON.ShaderMaterial("shader", this.scene, {
             vertex: "custom",
@@ -329,28 +340,37 @@ class Show {
 
         shaderMaterial.backFaceCulling = false;
 
-        //var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", { diameter: 1 }, scene);
         sphere.scaling = new BABYLON.Vector3(2,2,2);
         sphere.convertToFlatShadedMesh();
         sphere.material = shaderMaterial;
 
         var light: BABYLON.PointLight = sphere.getChildren()[0] as BABYLON.PointLight;
         light.intensity = 1.0;
+        var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+        this.shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
 
         var t = 0.0;
         var time = 0.0;
         var PERIOD_OF_EXPLOSION = 20;
         this.scene.registerBeforeRender( ()  => {
-            var r = this.randomFloatUnderOne();
-            var g = this.randomFloatUnderOne();
-            var b = this.randomFloatUnderOne();
+            var r = fireworksColor.r;
+            var g = fireworksColor.g;
+            var b = fireworksColor.b;
+            var a = 1.0;
 
             if (time < PERIOD_OF_EXPLOSION) {
-                let m1: any = sphere.material
+                if (time > (PERIOD_OF_EXPLOSION * 0.65)) {
+                    r = this.randomFloatUnderOne();
+                    g = this.randomFloatUnderOne();
+                    b = this.randomFloatUnderOne();
+                    a = 1 - (time/PERIOD_OF_EXPLOSION);
+                }
+                let m1: any = sphere.material;
                 m1.setFloat!("position", sphere.position);
                 m1.setFloat!("r", r);
                 m1.setFloat!("g", g);
                 m1.setFloat!("b", b);
+                m1.setFloat!("a", a);
                 m1.setFloat!("time", time);
                 light.intensity = 1 - (time/PERIOD_OF_EXPLOSION);
                 time += 0.1;

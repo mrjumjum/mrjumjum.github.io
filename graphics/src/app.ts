@@ -1,6 +1,7 @@
 import "@babylonjs/core/Debug/debugLayer";
 import "@babylonjs/inspector";
 import "@babylonjs/loaders/glTF";
+import "pepjs";
 import { Engine, Scene, FreeCamera, Vector3, HemisphericLight, Mesh, Color3, CubeTexture, MeshBuilder, StandardMaterial, Texture } from "@babylonjs/core";
 import skybox_nx from "./textures/skybox_nx.jpg";
 import skybox_ny from "./textures/skybox_ny.jpg";
@@ -63,7 +64,7 @@ const FRAGMENT_SHADER = "\r\n" +
 // const GRAVITY  = -5; // per second
 const ROCKET_VELOCITY = 10; // per second
 const GRAVITY  = -3; // per second
-const ROCKET_FLIGHT_TIME = 3; // seconds
+const ROCKET_FLIGHT_TIME = 2; // seconds
 const ROCKET_TRAIL_SLOW_TIME = ROCKET_FLIGHT_TIME * 2/3;
 const ROCKET_TRAIL_CUTOFF_TIME = ROCKET_FLIGHT_TIME * 5/6;
 const ROCKET_MASS = 1;
@@ -298,28 +299,32 @@ class Rocket {
 class Show {
     private canvas: HTMLCanvasElement;
     private engine: BABYLON.Engine;
+    private camera: BABYLON.FreeCamera;
     private scene: BABYLON.Scene;
     private shadowCasters: BABYLON.Mesh[] = [];
-    private rockets: Rocket[];
+    private rockets: Rocket[] = [];
     private assetsManager: BABYLON.AssetsManager;
     private explosionMesh: BABYLON.Mesh;
+    private ground: BABYLON.Mesh;
+    private sceneScale: number = 1;
 
     constructor(){
         this.canvas = document.createElement("canvas");;
         this.canvas.style.width = "100%";
         this.canvas.style.height = "100%";
         this.canvas.id = "canvas";
+        this.canvas["touch-action"] = "none";
         document.body.appendChild(this.canvas);
         this.engine = new BABYLON.Engine(this.canvas, true); // Generate the BABYLON 3D engine
         this.scene = new BABYLON.Scene(this.engine);
         this.scene.enablePhysics(new BABYLON.Vector3(0, GRAVITY, 0), new BABYLON.CannonJSPlugin());
         this.scene.clearColor = new BABYLON.Color4(0,0,0,1);
-        this.rockets = [];
 
         this.initCamera();
         this.initLights();
         // this.initSkybox();
-        this.initGroundXR();
+        this.initGround();
+        this.initXR();
         this.initText();
         this.initKeyEvents();
         this.fireHappyOnTimer();
@@ -334,9 +339,9 @@ class Show {
     }
 
     private initCamera() {
-        const camera = new FreeCamera("camera1", new Vector3(0, 5, -10), this.scene);
-        camera.setTarget(new Vector3(0,0,12));
-        camera.attachControl(this.canvas, true);
+        this.camera = new FreeCamera("camera1", new Vector3(0, 5, -10), this.scene);
+        this.camera.setTarget(new Vector3(0,0,12));
+        this.camera.attachControl(this.canvas, true);
 
     }
 
@@ -362,11 +367,13 @@ class Show {
         skybox.material = skyboxMaterial;
     }
 
-    private async initGroundXR() {
-        const ground = MeshBuilder.CreateGround("ground", {height: 1000, width: 1000, subdivisions: 1});
-        ground.receiveShadows = true;
-        ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.PlaneImpostor, { mass: 0, restitution: 0.9 }, this.scene);
+    private initGround() {
+        this.ground = MeshBuilder.CreateGround("ground", {height: 1000, width: 1000, subdivisions: 1});
+        this.ground.receiveShadows = true;
+        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(this.ground, BABYLON.PhysicsImpostor.PlaneImpostor, { mass: 0, restitution: 0.9 }, this.scene);
+    }
 
+    private async initXR() {
         const xr = await this.scene.createDefaultXRExperienceAsync({
             // floorMeshes: [ground],
             uiOptions: {
@@ -374,11 +381,27 @@ class Show {
             }
         });
 
-        if (!xr.baseExperience) {
-            console.log("NONE")
-            // no xr support
-        } else {
-            console.log("YES")
+        const supportsVR = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-vr');
+        const supportsAR = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-ar');
+
+        if (supportsAR) {
+            console.log("AR Supported");
+            const xr = await this.scene.createDefaultXRExperienceAsync({
+                uiOptions: {
+                    sessionMode: 'immersive-ar',
+                }
+            });
+            this.ground.dispose();
+        } else if (supportsVR){
+            console.log("VR Supported");
+            this.sceneScale = 0.5;
+            const xr = await this.scene.createDefaultXRExperienceAsync({
+                floorMeshes: [this.ground],
+                uiOptions: {
+                    sessionMode: 'immersive-vr',
+                }
+            });
+
             xr.input.onControllerAddedObservable.add((inputSource) => {
                 inputSource.onMotionControllerInitObservable.add((motionController) => {
                     const triggerComponent = motionController.getComponent("xr-standard-trigger");
@@ -400,16 +423,20 @@ class Show {
                     }
                 });
             });
+        } else {
+            console.log("No XR Supported");
         }
     }
 
     private initText() {
-        const Writer = MeshWriter(this.scene, { scale: 0.25, defaultFont: "Arial" });
+        const Writer = MeshWriter(this.scene, { scale: 0.25 * this.sceneScale, defaultFont: "Arial" });
         let textMeshes = []
+        const LETTER_HEIGHT = 10 * this.sceneScale;
+        const LETTER_THICKNESS = 5 * this.sceneScale;
         textMeshes.push(new Writer("Happy", {
             "font-family": "Arial",
-            "letter-height": 10,
-            "letter-thickness": 3,
+            "letter-height": LETTER_HEIGHT,
+            "letter-thickness": LETTER_THICKNESS,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -419,16 +446,16 @@ class Show {
                 emissive: "#000000"
             },
             position: {
-                x: -20,
-                y: 10,
-                z: 17,
+                x: -20 * this.sceneScale,
+                y: 10 * this.sceneScale,
+                z: 17 * this.sceneScale,
             }
         }).getMesh());
 
         textMeshes.push(new Writer("Mother's", {
             "font-family": "Arial",
-            "letter-height": 10,
-            "letter-thickness": 3,
+            "letter-height": LETTER_HEIGHT,
+            "letter-thickness": LETTER_THICKNESS,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -438,16 +465,16 @@ class Show {
                 emissive: "#000000"
             },
             position: {
-                x: 0,
-                y: 2,
-                z: 7,
+                x: 0 * this.sceneScale,
+                y: 2 * this.sceneScale,
+                z: 7 * this.sceneScale,
             }
         }).getMesh());
 
         textMeshes.push(new Writer("Day", {
             "font-family": "Arial",
-            "letter-height": 10,
-            "letter-thickness": 3,
+            "letter-height": LETTER_HEIGHT,
+            "letter-thickness": LETTER_THICKNESS,
             color: "#bfbfbf",
             anchor: "center",
             colors: {
@@ -457,9 +484,9 @@ class Show {
                 emissive: "#000000"
             },
             position: {
-                x: 20,
-                y: 15,
-                z: 2,
+                x: 20 * this.sceneScale,
+                y: 15 * this.sceneScale,
+                z: 2 * this.sceneScale,
             }
         }).getMesh());
 
@@ -473,7 +500,7 @@ class Show {
     }
 
     private initKeyEvents() {
-        window.addEventListener("keydown", (ev) => {
+        window.addEventListener("keydown", ev => {
             // Shift+Ctrl+I
             if (ev.shiftKey && ev.ctrlKey && ev.keyCode === 73) {
                 if (this.scene.debugLayer.isVisible()) {
@@ -481,6 +508,14 @@ class Show {
                 } else {
                     this.scene.debugLayer.show();
                 }
+            }
+        });
+
+        this.scene.onPointerObservable.add(pointerInfo => {
+            switch (pointerInfo.type) {
+                case BABYLON.PointerEventTypes.POINTERDOUBLETAP:
+                    this.fireRocket(pointerInfo.pickInfo.ray.direction.add(new BABYLON.Vector3(0,0.3,0)), pointerInfo.pickInfo.ray.origin);
+                    break;
             }
         });
     }
@@ -530,7 +565,7 @@ class Show {
     private fireHappyOnTimer(){
         // this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(randomInt(-5, 5),0,3));
         setInterval( () => {
-            this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(randomInt(-5, 5),0,3));
+            this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(randomInt(-5, 5),0,3).scale(this.sceneScale));
         }, 3000);
     }
 

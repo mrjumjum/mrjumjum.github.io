@@ -12,6 +12,9 @@ import flare from "./textures/flare.png";
 import firework_crackle from "./sounds/firework-crackle.mp3";
 import firework_pop from "./sounds/firework-pop.mp3";
 import firework_whistle from "./sounds/firework-whistle.wav";
+const json = require("./meshes/happy.babylon");
+let blob = new Blob([JSON.stringify(json)]);
+let url = URL.createObjectURL(blob);
 
 import * as BABYLON from "@babylonjs/core";
 import * as CANNON from "cannon";
@@ -19,16 +22,287 @@ import * as CANNON from "cannon";
 (window as any).CANNON = CANNON;
 import * as MeshWriter from "meshwriter";
 
-const ROCKET_VELOCITY = 12; // per second
-const GRAVITY  = -5; // per second
-const ROCKET_FLIGHT_TIME = 2; // seconds
+const TEXT_MESHES = [];
+
+const VERTEX_SHADER = "\r\n" +
+                "precision highp float;\r\n" +
+
+                "// Attributes\r\n" +
+                "attribute vec3 position;\r\n" +
+                "attribute vec3 normal;\r\n" +
+
+                "// Uniforms\r\n" +
+                "uniform mat4 worldViewProjection;\r\n" +
+                "uniform float time;\r\n" +
+                "uniform float r;\r\n" +
+                "uniform float g;\r\n" +
+                "uniform float b;\r\n" +
+                "uniform float a;\r\n" +
+
+                "void main(void) {\r\n" +
+                "    vec3 p = position;\r\n" +
+                "    vec3 j = vec3(0., -1.0, 0.);\r\n" +
+                "    p = p + normal * log2(1. + time) * 0.5;\r\n" +
+                "    gl_Position = worldViewProjection * vec4(p, 1.0);\r\n" +
+                "}\r\n";
+
+const FRAGMENT_SHADER = "\r\n" +
+                "precision highp float;\r\n" +
+
+                "uniform float time;\r\n" +
+                "uniform float r;\r\n" +
+                "uniform float g;\r\n" +
+                "uniform float b;\r\n" +
+                "uniform float a;\r\n" +
+
+                "void main(void) {\r\n" +
+                "    gl_FragColor = vec4(r, g, b, a );\r\n" +
+                "}\r\n";
+
+// const ROCKET_VELOCITY = 12; // per second
+// const GRAVITY  = -5; // per second
+const ROCKET_VELOCITY = 10; // per second
+const GRAVITY  = -3; // per second
+const ROCKET_FLIGHT_TIME = 3; // seconds
+const ROCKET_TRAIL_SLOW_TIME = ROCKET_FLIGHT_TIME * 2/3;
+const ROCKET_TRAIL_CUTOFF_TIME = ROCKET_FLIGHT_TIME * 5/6;
 const ROCKET_MASS = 1;
+const ROCKET_EXPLOSION_PERIOD = 3; // seconds
+
+const SECOND_MS = 1000;
+
+function randomInt(min: number, max: number){
+    return Math.floor(Math.random() * (max - min) ) + min;
+}
+
+function randomFloatUnderOnePositiveOrNegative(){
+    var tmp = randomInt(0,2)
+    var sign = 1;
+    if(tmp === 1) {
+        sign = -1
+    }
+    return randomFloatUnderOne() * sign;
+}
+
+function randomFloatUnderOne(){
+    return Math.random();
+}
+
+enum ROCKET_STATES{
+    CREATED,
+    FIRED,
+    EXPLODE_START,
+    TEMP,
+    EXPLODING,
+    EXPLODED,
+    CLEANED_UP,
+}
+
+
+class Rocket {
+    private mesh: BABYLON.Mesh;
+    private particleSystem: BABYLON.ParticleSystem;
+    private light: BABYLON.PointLight;
+    private startingDirection: BABYLON.Vector3;
+    private scene: BABYLON.Scene;
+    public currentState: ROCKET_STATES;
+    private startFlightTime: number;
+    private startExplosionTime: number;
+    private color: BABYLON.Color3;
+    private shaderMaterial: BABYLON.ShaderMaterial;
+    private explosionPCS: BABYLON.PointsCloudSystem;
+
+    constructor(scene: BABYLON.Scene, startingDirection: BABYLON.Vector3, startingPosition: BABYLON.Vector3, shadowCasters: BABYLON.Mesh[]) {
+        this.startingDirection = startingDirection;
+        this.scene = scene;
+        this.mesh = BABYLON.MeshBuilder.CreateSphere("rocket", {diameter:.15}, this.scene);
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(this.mesh, BABYLON.PhysicsImpostor.SphereImpostor, { mass: ROCKET_MASS, restitution: 0.9 }, this.scene);
+        this.mesh.position = startingPosition;
+        this.mesh.convertToUnIndexedMesh();
+        this.mesh.material = new BABYLON.StandardMaterial("rocketMaterial", this.scene);
+        this.color = new BABYLON.Color3(randomFloatUnderOne(), randomFloatUnderOne(), randomFloatUnderOne());
+        (this.mesh.material as BABYLON.StandardMaterial).diffuseColor =  this.color.clone();
+        (this.mesh.material as BABYLON.StandardMaterial).specularColor =  this.color.clone();
+        (this.mesh.material as BABYLON.StandardMaterial).emissiveColor =  this.color.clone();
+        (this.mesh.material as BABYLON.StandardMaterial).ambientColor =  this.color.clone();
+        this.shaderMaterial = new BABYLON.ShaderMaterial("shader", this.scene, {
+            vertex: "custom",
+            fragment: "custom",
+        },
+        {
+            attributes: ["position", "normal", "uv", "color"],
+            uniforms: ["world", "worldView", "worldViewProjection", "view", "projection"],
+            needAlphaBlending: true
+        });
+        this.shaderMaterial.backFaceCulling = false;
+
+
+        this.light = new BABYLON.PointLight("pointlight", new BABYLON.Vector3(this.mesh.position.x, this.mesh.position.y-0.26, this.mesh.position.z), this.scene);
+        var shadowGenerator = new BABYLON.ShadowGenerator(1024, this.light);
+        shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
+        this.light.intensity = 0.2;
+        this.light.diffuse = this.color.clone();
+        this.light.specular = this.color.clone();
+        this.light.parent = this.mesh;
+
+        this.particleSystem = this.attachParticleSystem(this.mesh);
+        this.currentState = ROCKET_STATES.CREATED;
+    }
+
+    public update(currentTime: number) {
+        switch (this.currentState) {
+            case ROCKET_STATES.CREATED:
+                this.mesh.physicsImpostor.setLinearVelocity(this.startingDirection.normalizeToNew().multiplyByFloats(ROCKET_VELOCITY, ROCKET_VELOCITY, ROCKET_VELOCITY));
+                this.particleSystem.start()
+                let whistleSound = new BABYLON.Sound("firework-whistle", firework_whistle, this.scene, null, {
+                    autoplay: true,
+                    spatialSound: true,
+                    distanceModel: "linear",
+                    maxDistance: 1000,
+                    rolloffFactor: 40
+                });
+                whistleSound.attachToMesh(this.mesh);
+                this.startFlightTime = currentTime;
+                this.currentState = ROCKET_STATES.FIRED;
+                break;
+            case ROCKET_STATES.FIRED:
+                if(currentTime >= this.startFlightTime + ROCKET_FLIGHT_TIME * SECOND_MS){
+                    this.particleSystem.dispose();
+                    // this.currentState = ROCKET_STATES.EXPLODE_START;
+                    this.currentState = ROCKET_STATES.EXPLODED;
+                } else if (currentTime >= this.startFlightTime + ROCKET_TRAIL_CUTOFF_TIME * SECOND_MS) {
+                    this.particleSystem.stop();
+                } else if (currentTime >= this.startFlightTime + ROCKET_TRAIL_SLOW_TIME * SECOND_MS){
+                    this.particleSystem.emitRate = 100;
+                    this.particleSystem.minLifeTime = 0.2;
+                    this.particleSystem.maxLifeTime = 0.5;
+                }
+                break;
+            case ROCKET_STATES.EXPLODE_START:
+                this.startExplosionTime = currentTime;
+                this.mesh.physicsImpostor.dispose();
+                this.createFireworksExplosion();
+                let popSound = new BABYLON.Sound("firework-pop", firework_pop, this.scene, null, {
+                    autoplay: true,
+                    spatialSound: true,
+                    distanceModel: "linear",
+                    maxDistance: 1000,
+                    rolloffFactor: 10
+                });
+                popSound.attachToMesh(this.mesh);
+                new BABYLON.Sound("firework-crackle", firework_crackle, this.scene, null, {
+                    autoplay: true
+                });
+                this.currentState = ROCKET_STATES.TEMP;
+                break;
+            case ROCKET_STATES.TEMP:
+                break;
+            case ROCKET_STATES.EXPLODING:
+                if (currentTime <= this.startExplosionTime + ROCKET_EXPLOSION_PERIOD * SECOND_MS) {
+                    this.explosionPCS.setParticles();
+                } else{
+                    this.explosionPCS.dispose();
+                    this.currentState = ROCKET_STATES.EXPLODED;
+                }
+                break;
+            case ROCKET_STATES.EXPLODED:
+                this.cleanUp();
+                this.currentState = ROCKET_STATES.CLEANED_UP;
+                break;
+        }
+    }
+
+    private attachParticleSystem(mesh: BABYLON.Mesh){
+        var particleSystem = new BABYLON.ParticleSystem("particles", 2000, this.scene);
+        //Texture of each particle
+        particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
+
+        // Where the particles come from
+        particleSystem.emitter = mesh; //new BABYLON.Vector3(0, 0, 0); // the starting object, the emitter
+        particleSystem.minEmitBox = new BABYLON.Vector3(-0.2, -0.2, -0.2); // Starting all from
+        particleSystem.maxEmitBox = new BABYLON.Vector3(0.2, 0.2, 0.2); // To...
+
+        // Size of each particle (random between...
+        particleSystem.minSize = 0.01;
+        particleSystem.maxSize = 0.1;
+
+        // Life time of each particle (random between...
+        particleSystem.minLifeTime = 0.3;
+        particleSystem.maxLifeTime = 0.7;
+
+        // Emission rate
+        particleSystem.emitRate = 1000;
+
+        // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
+        particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+
+        // Set the gravity of all particles
+        particleSystem.gravity = new BABYLON.Vector3(0, -9.81, 0);
+
+        // Direction of each particle after it has been emitted
+        particleSystem.direction1 = new BABYLON.Vector3(-1, -1, 3);
+        particleSystem.direction2 = new BABYLON.Vector3(1, -1, -3);
+
+        // Angular speed, in radians
+        particleSystem.minAngularSpeed = 0;
+        particleSystem.maxAngularSpeed = Math.PI;
+
+        // Speed
+        particleSystem.minEmitPower = 1;
+        particleSystem.maxEmitPower = 3;
+        particleSystem.updateSpeed = 0.005;
+
+        particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
+        return particleSystem;
+    }
+
+    private createFireworksExplosion(){
+        this.light.intensity = 1.0;
+        this.mesh.visibility = 0;
+        this.explosionPCS = new BABYLON.PointsCloudSystem("pcs", 2, this.scene);
+        this.explosionPCS.initParticles = () => {
+            // for (let p = 0; p < this.explosionPCS.nbParticles; p++) {
+            //     (this.explosionPCS.particles[p] as any).velocity = this.explosionPCS.particles[p].position.subtract(this.mesh.position);
+            //     // (this.explosionPCS.particles[p] as any).velocity = this.explosionPCS.particles[p].position;
+            //     (this.explosionPCS.particles[p] as any).initPosition = this.explosionPCS.particles[p].position.clone();
+            // }
+        }
+
+        // const tempMesh = new BABYLON.Mesh("temp", this.scene, null, TEXT_MESHES[0]);
+        // const tempMesh = BABYLON.MeshBuilder.CreateSphere("rocket", {diameter:1}, this.scene);
+        // this.mesh.clone()
+        // tempMesh.visibility = 0;
+        TEXT_MESHES[0].position = this.mesh.position;
+        const fireworksColor = (this.mesh.material as BABYLON.StandardMaterial).diffuseColor.clone().toColor4();
+        this.explosionPCS.addSurfacePoints(TEXT_MESHES[0], 5000, BABYLON.PointColor.Stated, fireworksColor, 0.8);
+        this.explosionPCS.buildMeshAsync().then((mesh) => {
+            // tempMesh.dispose();
+            this.explosionPCS.initParticles();
+            this.explosionPCS.setParticles();
+            this.currentState = ROCKET_STATES.EXPLODING;
+        });
+
+        this.explosionPCS.updateParticle = (particle) => {
+            // this.explosionPCS.vars.elapsedTime = Date.now() - this.startExplosionTime;
+            // particle.position = (particle as any).initPosition.add(particle.velocity.scale(Math.log2(1 + (this.explosionPCS.vars.elapsedTime / SECOND_MS)) * 20));
+            // particle.color = fireworksColor.scale(1 - this.explosionPCS.vars.elapsedTime / (ROCKET_EXPLOSION_PERIOD * SECOND_MS));
+            return particle;
+        }
+    }
+
+    private cleanUp() {
+        this.mesh.dispose();
+    }
+}
 
 class Show {
     private canvas: HTMLCanvasElement;
     private engine: BABYLON.Engine;
     private scene: BABYLON.Scene;
     private shadowCasters: BABYLON.Mesh[] = [];
+    private rockets: Rocket[];
+    private assetsManager: BABYLON.AssetsManager;
+    private explosionMesh: BABYLON.Mesh;
 
     constructor(){
         this.canvas = document.createElement("canvas");;
@@ -39,24 +313,31 @@ class Show {
         this.engine = new BABYLON.Engine(this.canvas, true); // Generate the BABYLON 3D engine
         this.scene = new BABYLON.Scene(this.engine);
         this.scene.enablePhysics(new BABYLON.Vector3(0, GRAVITY, 0), new BABYLON.CannonJSPlugin());
+        this.scene.clearColor = new BABYLON.Color4(0,0,0,1);
+        this.rockets = [];
 
         this.initCamera();
-        // this.initLights();
+        this.initLights();
         // this.initSkybox();
         this.initGroundXR();
         this.initText();
         this.initKeyEvents();
-        // this.fireRocketOnTimer();
+        this.fireHappyOnTimer();
 
+        this.assetsManager = new BABYLON.AssetsManager(this.scene);
 
+        this.scene.registerBeforeRender( ()  => {
+            this.updateRockets();
+        });
         //init background music
         // this.initBackgroundMusic();
     }
 
     private initCamera() {
         const camera = new FreeCamera("camera1", new Vector3(0, 5, -10), this.scene);
-        camera.setTarget(Vector3.Zero());
+        camera.setTarget(new Vector3(0,0,12));
         camera.attachControl(this.canvas, true);
+
     }
 
     private initLights() {
@@ -91,8 +372,10 @@ class Show {
         });
 
         if (!xr.baseExperience) {
+            console.log("NONE")
             // no xr support
         } else {
+            console.log("YES")
             xr.input.onControllerAddedObservable.add((inputSource) => {
                 inputSource.onMotionControllerInitObservable.add((motionController) => {
                     const triggerComponent = motionController.getComponent("xr-standard-trigger");
@@ -199,230 +482,52 @@ class Show {
         });
     }
 
-    runRenderLoop() {
-        this.engine.runRenderLoop(() => {
-            this.scene.render();
+    run() {
+        this.assetsManager.onTaskErrorObservable.add((task) => {
+            console.log('task failed', task.errorObject.message, task.errorObject.exception);
+        });
+        this.assetsManager.addTextureTask("flare task", flare);
+        this.assetsManager.addBinaryFileTask("firework pop task", firework_pop);
+        this.assetsManager.addBinaryFileTask("firework crackle task", firework_crackle);
+        this.assetsManager.addBinaryFileTask("firework whistle task", firework_whistle);
+        // const task = this.assetsManager.addMeshTask("happy mesh task", "", "", url).onSuccess = t => {
+        //     console.log("SUCCESS:",t)
+        //     TEXT_MESHES.push(t.loadedMeshes[0]);
+        // }
+
+        this.assetsManager.onTaskError = t => console.log("Loading task failed:", t)
+        BABYLON.Effect.ShadersStore["customVertexShader"] = VERTEX_SHADER;
+        BABYLON.Effect.ShadersStore["customFragmentShader"] = FRAGMENT_SHADER;
+
+        this.assetsManager.load();
+        this.assetsManager.onProgress = (remainingCount, totalCount, lastFinishedTask) => {
+            this.engine.loadingUIText = 'We are loading the scene. ' + remainingCount + ' out of ' + totalCount + ' items still need to be loaded.';
+        };
+
+        this.assetsManager.onFinish = tasks => {
+            this.engine.runRenderLoop(() => {
+                this.scene.render();
+            });
+        };
+    }
+
+    private updateRockets() {
+        const currentTime = Date.now();
+        this.rockets.forEach((r, i) => {
+            if (r.currentState !== ROCKET_STATES.CLEANED_UP) {
+                r.update(currentTime);
+            }
         });
     }
 
     private fireRocket(direction: BABYLON.Vector3, startingPosition: BABYLON.Vector3){
-        var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter:.15}, this.scene);
-        sphere.physicsImpostor = new BABYLON.PhysicsImpostor(sphere, BABYLON.PhysicsImpostor.SphereImpostor, { mass: ROCKET_MASS, restitution: 0.9 }, this.scene);
-
-        var light = new BABYLON.PointLight("pointlight", new BABYLON.Vector3(sphere.position.x, sphere.position.y-0.26, sphere.position.z), this.scene)
-        var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
-        this.shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
-
-        light.intensity = 0.2;
-        light.parent = sphere;
-
-        sphere.convertToUnIndexedMesh();
-        // sphere.cullingStrategy = BABYLON.AbstractMesh.CULLINGSTRATEGY_OPTIMISTIC_INCLUSION_THEN_BSPHERE_ONLY;
-        // give sphere a color
-        var sphereMaterial = new BABYLON.StandardMaterial("sphereMaterial", this.scene);
-        var rgb = [this.randomFloatUnderOne(), this.randomFloatUnderOne(), this.randomFloatUnderOne()];
-        var rocketColor = new BABYLON.Color3(...rgb);
-        sphereMaterial.diffuseColor =  rocketColor;
-        sphereMaterial.specularColor = rocketColor;
-        sphereMaterial.emissiveColor = rocketColor;
-        sphereMaterial.ambientColor =  rocketColor;
-        sphere.material = sphereMaterial;
-        light.diffuse = rocketColor;
-        light.specular = rocketColor;
-
-        var particleSystem = this.attachParticleSystem(sphere);
-        particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
-
-        const SECOND_MS = 1000;
-        const particleSlowDownTime = ROCKET_FLIGHT_TIME * SECOND_MS * 2/3;
-        const particleCutoffTime = ROCKET_FLIGHT_TIME * SECOND_MS * 5/6;
-
-        sphere.position = startingPosition.clone();
-        sphere.physicsImpostor.setLinearVelocity(direction.normalizeToNew().multiplyByFloats(ROCKET_VELOCITY, ROCKET_VELOCITY, ROCKET_VELOCITY));
-        let whistleSound = new BABYLON.Sound("firework-whistle", firework_whistle, this.scene, null, {
-            autoplay: true,
-            spatialSound: true,
-            distanceModel: "linear",
-            maxDistance: 1000,
-            rolloffFactor: 20
-        });
-        whistleSound.attachToMesh(sphere);
-
-        const startTime = Date.now();
-        let exploded = false;
-        this.scene.registerAfterRender( () => {
-            const t = Date.now();
-            if(t < startTime + particleSlowDownTime) {
-
-            }else if (t < startTime + particleCutoffTime){
-                particleSystem.emitRate = 100;
-                particleSystem.minLifeTime = 0.2;
-                particleSystem.maxLifeTime = 0.5;
-            }else if(t < startTime + ROCKET_FLIGHT_TIME * SECOND_MS){
-                particleSystem.stop();
-            }else{
-                if(!exploded){
-                    particleSystem.dispose();
-                    exploded = true;
-                    sphere.physicsImpostor.dispose();
-                    this.createFireworksExplosion(sphere);
-                    let popSound = new BABYLON.Sound("firework-pop", firework_pop, this.scene, null, {
-                        autoplay: true,
-                        spatialSound: true,
-                        distanceModel: "linear",
-                        maxDistance: 1000,
-                        rolloffFactor: 10
-                    });
-                    popSound.attachToMesh(sphere);
-                    new BABYLON.Sound("firework-crackle", firework_crackle, this.scene, null, {
-                        autoplay: true
-                    });
-                }
-            }
-        });
+        this.rockets.push(new Rocket(this.scene, direction, startingPosition, this.shadowCasters));
     }
 
-    private attachParticleSystem(mesh: BABYLON.Mesh){
-        var particleSystem = new BABYLON.ParticleSystem("particles", 2000, this.scene);
-        //Texture of each particle
-        particleSystem.particleTexture = new BABYLON.Texture(flare, this.scene);
-
-        // Where the particles come from
-        particleSystem.emitter = mesh; //new BABYLON.Vector3(0, 0, 0); // the starting object, the emitter
-        particleSystem.minEmitBox = new BABYLON.Vector3(-0.2, -0.2, -0.2); // Starting all from
-        particleSystem.maxEmitBox = new BABYLON.Vector3(0.2, 0.2, 0.2); // To...
-
-        // Size of each particle (random between...
-        particleSystem.minSize = 0.01;
-        particleSystem.maxSize = 0.1;
-
-        // Life time of each particle (random between...
-        particleSystem.minLifeTime = 0.3;
-        particleSystem.maxLifeTime = 0.7;
-
-        // Emission rate
-        particleSystem.emitRate = 1000;
-
-        // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
-        particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
-
-        // Set the gravity of all particles
-        particleSystem.gravity = new BABYLON.Vector3(0, -9.81, 0);
-
-        // Direction of each particle after it has been emitted
-        particleSystem.direction1 = new BABYLON.Vector3(-1, -1, 3);
-        particleSystem.direction2 = new BABYLON.Vector3(1, -1, -3);
-
-        // Angular speed, in radians
-        particleSystem.minAngularSpeed = 0;
-        particleSystem.maxAngularSpeed = Math.PI;
-
-        // Speed
-        particleSystem.minEmitPower = 1;
-        particleSystem.maxEmitPower = 3;
-        particleSystem.updateSpeed = 0.005;
-        particleSystem.start();
-        return particleSystem;
-    }
-
-    private createFireworksExplosion(sphere : BABYLON.Mesh){
-        const fireworksColor = (sphere.material as BABYLON.StandardMaterial).diffuseColor.clone();
-        if (!BABYLON.Effect.ShadersStore["customVertexShader"]){
-            BABYLON.Effect.ShadersStore["customVertexShader"] = "\r\n" +
-                "precision highp float;\r\n" +
-
-                "// Attributes\r\n" +
-                "attribute vec3 position;\r\n" +
-                "attribute vec3 normal;\r\n" +
-
-                "// Uniforms\r\n" +
-                "uniform mat4 worldViewProjection;\r\n" +
-                "uniform float time;\r\n" +
-                "uniform float r;\r\n" +
-                "uniform float g;\r\n" +
-                "uniform float b;\r\n" +
-                "uniform float a;\r\n" +
-
-                "void main(void) {\r\n" +
-                "    vec3 p = position;\r\n" +
-                "    vec3 j = vec3(0., -1.0, 0.);\r\n" +
-                "    p = p + normal * log(time) * 0.5;\r\n" +
-                "    gl_Position = worldViewProjection * vec4(p, 1.0);\r\n" +
-                "}\r\n";
-
-            BABYLON.Effect.ShadersStore["customFragmentShader"] = "\r\n" +
-                "precision highp float;\r\n" +
-
-                "uniform float time;\r\n" +
-                "uniform float r;\r\n" +
-                "uniform float g;\r\n" +
-                "uniform float b;\r\n" +
-                "uniform float a;\r\n" +
-
-                "void main(void) {\r\n" +
-                "    gl_FragColor = vec4(r, g, b, a );\r\n" +
-                "}\r\n";
-        }
-
-        var shaderMaterial = new BABYLON.ShaderMaterial("shader", this.scene, {
-            vertex: "custom",
-            fragment: "custom",
-        },
-        {
-            attributes: ["position", "normal", "uv", "color"],
-            uniforms: ["world", "worldView", "worldViewProjection", "view", "projection"],
-            needAlphaBlending: true
-        });
-
-
-        shaderMaterial.backFaceCulling = false;
-
-        sphere.scaling = new BABYLON.Vector3(2,2,2);
-        sphere.convertToFlatShadedMesh();
-        sphere.material = shaderMaterial;
-
-        var light: BABYLON.PointLight = sphere.getChildren()[0] as BABYLON.PointLight;
-        light.intensity = 1.0;
-        var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
-        this.shadowCasters.forEach(m => shadowGenerator.addShadowCaster(m));
-
-        var t = 0.0;
-        var time = 0.0;
-        var PERIOD_OF_EXPLOSION = 20;
-        this.scene.registerBeforeRender( ()  => {
-            var r = fireworksColor.r;
-            var g = fireworksColor.g;
-            var b = fireworksColor.b;
-            var a = 1.0;
-
-            if (time < PERIOD_OF_EXPLOSION) {
-                if (time > (PERIOD_OF_EXPLOSION * 0.65)) {
-                    r = this.randomFloatUnderOne();
-                    g = this.randomFloatUnderOne();
-                    b = this.randomFloatUnderOne();
-                    a = 1 - (time/PERIOD_OF_EXPLOSION);
-                }
-                let m1: any = sphere.material;
-                m1.setFloat!("position", sphere.position);
-                m1.setFloat!("r", r);
-                m1.setFloat!("g", g);
-                m1.setFloat!("b", b);
-                m1.setFloat!("a", a);
-                m1.setFloat!("time", time);
-                light.intensity = 1 - (time/PERIOD_OF_EXPLOSION);
-                time += 0.1;
-            } else {
-                shaderMaterial.dispose();
-                sphere.material?.dispose();
-                sphere.dispose();
-            }
-        });
-    }
-
-    private fireRocketOnTimer(){
-        this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(5,5,5));
+    private fireHappyOnTimer(){
+        // this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(randomInt(-5, 5),0,3));
         setInterval( () => {
-            this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(5,5,5));
+            this.fireRocket(new BABYLON.Vector3(0,1,0), new BABYLON.Vector3(randomInt(-5, 5),0,3));
         }, 3000);
     }
 
@@ -446,7 +551,7 @@ class Show {
 
 function runShow() {
     let show = new Show();
-    show.runRenderLoop();
+    show.run();
 }
 
 runShow();

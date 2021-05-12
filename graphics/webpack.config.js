@@ -36,6 +36,10 @@ module.exports = {
                     },
                 }],
             },
+            {
+                test: /\.babylon$/,
+                loader: 'json-loader'
+            },
         ],
     },
     plugins: [

@@ -368,7 +368,10 @@ class Show {
         ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.PlaneImpostor, { mass: 0, restitution: 0.9 }, this.scene);
 
         const xr = await this.scene.createDefaultXRExperienceAsync({
-            floorMeshes: [ground],
+            // floorMeshes: [ground],
+            uiOptions: {
+                sessionMode: 'immersive-ar',
+            }
         });
 
         if (!xr.baseExperience) {

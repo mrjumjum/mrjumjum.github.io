@@ -18,6 +18,7 @@ module.exports = {
         disableHostCheck: true,
         contentBase: path.resolve(appDirectory, "public"), //tells webpack to serve from the public folder
         publicPath: "/",
+        compress: true,
         hot: true,
     },
     module: {

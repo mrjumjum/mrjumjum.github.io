@@ -24,6 +24,8 @@
     "webpack-dev-server": "^3.11.2"
   },
   "dependencies": {
+    "babylonjs": "^5.0.0-alpha.22",
+    "babylonjs-gui": "^4.2.0",
     "cannon": "^0.6.2",
     "meshwriter": "^1.2.4",
     "pepjs": "^0.5.3"

@@ -12,18 +12,18 @@ Exporter version: 2.80.1, Blender version: 2.83.13
 		Texture directory   :  /Users/jerchang/Documents/mrjumjum/mrjumjum.github.io/graphics/src/meshes/
 	Python World class constructor completed
 	processing begun of camera (UniversalCamera):  Camera
-	processing begun of mesh:  Text
+	processing begun of mesh:  Happy
 		WARNING: No materials have been assigned: 
-		num positions      :  45
-		num normals        :  45
+		num positions      :  600
+		num normals        :  600
 		num tangents       :  0
-		num uvs            :  90
+		num uvs            :  1200
 		num uvs2           :  0
 		num colors         :  0
-		num triangles      :  28
+		num triangles      :  568
 	processing begun of light (POINT):  Light
 ========= Writing of JSON file started =========
-	writing mesh:  Text
+	writing mesh:  Happy
 ========= Writing of JSON file completed =========
 ========= end of processing =========
-elapsed time:  0 min, 0.0051 secs
+elapsed time:  0 min, 0.0561 secs

@@ -159,7 +159,7 @@ class Show {
                                     const resultRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3());
                                     // get the pointer direction
                                     inputSource.getWorldPointerRayToRef(resultRay);
-                                    this.fireRocket(resultRay.direction, resultRay.origin, MESHES_LIST[0]);
+                                    this.fireRocket(resultRay.direction, resultRay.origin, MESHES_LIST[MESHES.HEART]);
                                 }
                             }
                         });
